@@ -7,21 +7,43 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
+local ReGui = require(game.ReplicatedStorage.ReGui) -- Ensure ReGui is in ReplicatedStorage
+ReGui:Init()
+
+-- Define the modern red and black theme
+ReGui:DefineTheme("CrimsonBlade", {
+	TitleAlign = Enum.TextXAlignment.Center,
+	TextDisabled = Color3.fromRGB(80, 80, 80),
+	Text = Color3.fromRGB(255, 0, 0), -- Bright Red
+	
+	FrameBg = Color3.fromRGB(15, 15, 15),
+	FrameBgTransparency = 0.3,
+	FrameBgActive = Color3.fromRGB(50, 0, 0), -- Darker Red for active/hover
+	FrameBgTransparencyActive = 0.2,
+	
+	CheckMark = Color3.fromRGB(255, 0, 0),
+	SliderGrab = Color3.fromRGB(255, 0, 0),
+	ButtonsBg = Color3.fromRGB(200, 0, 0), -- Standard button red
+	CollapsingHeaderBg = Color3.fromRGB(200, 0, 0),
+	CollapsingHeaderText = Color3.fromRGB(255, 255, 255),
+	RadioButtonHoveredBg = Color3.fromRGB(255, 50, 50),
+	
+	WindowBg = Color3.fromRGB(25, 25, 25),
+	TitleBarBg = Color3.fromRGB(35, 35, 35),
+	TitleBarBgActive = Color3.fromRGB(50, 0, 0),
+	
+	Border = Color3.fromRGB(60, 60, 60),
+	ResizeGrab = Color3.fromRGB(255, 0, 0),
+	RegionBgTransparency = 0.1,
+})
+
 local DEFAULT_MIN_OLD_VERSION = 1224
 local DEFAULT_MAX_OLD_VERSION = 1237
 local EASTER_SHOP_ASSET_ID = "1234567890" -- Placeholder: REPLACE WITH ACTUAL EASTER SHOP MODEL/ASSET ID IF APPLICABLE
 
-local GUI_COLOR_BACKGROUND = Color3.fromRGB(20, 20, 20)
-local GUI_COLOR_FOREGROUND = Color3.fromRGB(0, 255, 0)
-local GUI_COLOR_ACCENT = Color3.fromRGB(0, 180, 0)
-local GUI_BORDER_RADIUS = 8
-
 local SOUND_CLICK = 12759902633
 local SOUND_FOUND = 13580554160
 
-local Gui
-local IsDragging = false
-local DraggingOffset
 local AutoRetryEnabled = false
 local IsScanning = false
 local LastScanTime = 0
@@ -30,25 +52,27 @@ local ScanCooldown = 10
 local currentMinFilter = DEFAULT_MIN_OLD_VERSION
 local currentMaxFilter = DEFAULT_MAX_OLD_VERSION
 
+local currentVersionLabelRef = nil
+local playerCountLabelRef = nil
+local jobIDLabelRef = nil
+local totalOldServersLabelRef = nil
+local autoRetryToggleRef = nil
+
 if game.PlaceId ~= PlaceId then
-    local notification = Instance.new("ScreenGui")
-    notification.Name = "XC0Z3_Error_Notification"
-    notification.Parent = LocalPlayer.PlayerGui
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(0.4, 0, 0.1, 0)
-    textLabel.Position = UDim2.new(0.3, 0, 0.45, 0)
-    textLabel.BackgroundColor3 = Color3.fromRGB(50, 0, 0)
-    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    textLabel.Font = Enum.Font.Code
-    textLabel.TextScaled = true
-    textLabel.TextWrap = true
-    textLabel.Text = "XC0Z3 Old Server Finder: Wrong Game! This script is for Grow A Garden only."
-    textLabel.BorderSizePixel = 0
-    textLabel.Parent = notification
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, GUI_BORDER_RADIUS)
-    corner.Parent = textLabel
-    game:GetService("Debris"):AddItem(notification, 5)
+    warn("XC0Z3 Old Server Finder: Wrong Game! This script is for Grow A Garden only.")
+    -- Use ReGui for a notification since it's now the primary GUI framework
+    ReGui:PopupModal({
+        Title = "Error",
+        AutoSize = "Y",
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+    }):Center():Label({
+        Text = "Wrong Game! This script is for Grow A Garden only.",
+        TextColor = Color3.fromRGB(255, 50, 50),
+        TextWrapped = true,
+    }):Button({
+        Text = "Close",
+        Callback = function(self) self:ClosePopup() end
+    })
     return
 end
 
@@ -63,456 +87,168 @@ local function playSound(soundId)
     end)
 end
 
-local function createUIElement(className, parent, name, size, position, backgroundColor, textColor, text, font, textScaled)
-    local element = Instance.new(className)
-    element.Name = name or className
-    element.Size = size or UDim2.new(0, 0, 0, 0)
-    element.Position = position or UDim2.new(0, 0, 0, 0)
-    element.BackgroundColor3 = backgroundColor or GUI_COLOR_BACKGROUND
-    element.BorderSizePixel = 0
-    
-    if className == "TextLabel" or className == "TextButton" or className == "TextBox" then
-        element.TextColor3 = textColor or GUI_COLOR_FOREGROUND
-        element.Text = text or ""
-        element.Font = font or Enum.Font.Code
-        element.TextScaled = textScaled or false
-    end
-    
-    element.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, GUI_BORDER_RADIUS)
-    corner.Parent = element
-    return element
-end
-
 local function showNotification(message, isError)
-    local notificationGui = Instance.new("ScreenGui")
-    notificationGui.Name = "XC0Z3_Notification"
-    notificationGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    notificationGui.Parent = LocalPlayer.PlayerGui
-    local frame = createUIElement("Frame", notificationGui, "NotificationFrame", UDim2.new(0.3, 0, 0.08, 0), UDim2.new(0.35, 0, 0.05, 0), isError and Color3.fromRGB(150, 0, 0) or GUI_COLOR_BACKGROUND)
-    frame.BackgroundTransparency = 0.1
-    local textLabel = createUIElement("TextLabel", frame, "NotificationText", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), frame.BackgroundColor3, isError and Color3.fromRGB(255, 255, 255) or GUI_COLOR_FOREGROUND, message, Enum.Font.Code, true)
-    textLabel.TextWrap = true
-    textLabel.BackgroundTransparency = 1
-    frame.Transparency = 1
-    textLabel.TextTransparency = 1
-    local fadeInTween = TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 0.1 })
-    local fadeOutTween = TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 2.5), { Transparency = 1 })
-    local textFadeInTween = TweenService:Create(textLabel, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 })
-    local textFadeOutTween = TweenService:Create(textLabel, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 2.5), { TextTransparency = 1 })
-    fadeInTween:Play()
-    textFadeInTween:Play()
-    fadeInTween.Completed:Connect(function()
-        fadeOutTween:Play()
-        textFadeOutTween:Play()
-    end)
-    fadeOutTween.Completed:Connect(function()
-        notificationGui:Destroy()
-    end)
+    ReGui:PopupModal({
+        Title = isError and "Error" or "Notification",
+        AutoSize = "Y",
+        Position = UDim2.new(0.5, 0, 0.1, 0), -- Position near top
+    }):Center():Label({
+        Text = message,
+        TextColor = isError and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 255, 255), -- White text for normal, red for error
+        TextWrapped = true,
+    }):Button({
+        Text = "Dismiss",
+        Callback = function(self) self:ClosePopup() end
+    })
 end
 
 local function showConfirmDialog(message, onConfirm)
-    local confirmGui = Instance.new("ScreenGui")
-    confirmGui.Name = "XC0Z3_Confirm_Dialog"
-    confirmGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    confirmGui.Parent = LocalPlayer.PlayerGui
-    local overlay = createUIElement("Frame", confirmGui, "Overlay", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Color3.fromRGB(0, 0, 0))
-    overlay.BackgroundTransparency = 0.8
-    local dialogFrame = createUIElement("Frame", overlay, "DialogFrame", UDim2.new(0.4, 0, 0.25, 0), UDim2.new(0.3, 0, 0.375, 0), GUI_COLOR_BACKGROUND)
-    dialogFrame.BackgroundTransparency = 0
-    dialogFrame.BorderColor3 = GUI_COLOR_FOREGROUND
-    dialogFrame.BorderSizePixel = 1
-    local messageLabel = createUIElement("TextLabel", dialogFrame, "MessageLabel", UDim2.new(0.9, 0, 0.6, 0), UDim2.new(0.05, 0, 0.05, 0), GUI_COLOR_BACKGROUND, GUI_COLOR_FOREGROUND, message, Enum.Font.Code, true)
-    messageLabel.BackgroundTransparency = 1
-    messageLabel.TextWrapped = true
-    local confirmButton = createUIElement("TextButton", dialogFrame, "ConfirmButton", UDim2.new(0.4, 0, 0.25, 0), UDim2.new(0.05, 0, 0.7, 0), GUI_COLOR_FOREGROUND, GUI_COLOR_BACKGROUND, "Confirm", Enum.Font.Code, true)
-    confirmButton.BackgroundTransparency = 0
-    confirmButton.HoverBackgroundColor3 = GUI_COLOR_ACCENT
-    confirmButton.AutoButtonColor = false
-    local cancelButton = createUIElement("TextButton", dialogFrame, "CancelButton", UDim2.new(0.4, 0, 0.25, 0), UDim2.new(0.55, 0, 0.7, 0), GUI_COLOR_BACKGROUND, GUI_COLOR_FOREGROUND, "Cancel", Enum.Font.Code, true)
-    cancelButton.BackgroundTransparency = 0
-    cancelButton.BorderColor3 = GUI_COLOR_FOREGROUND
-    cancelButton.BorderSizePixel = 1
-    cancelButton.HoverBackgroundColor3 = GUI_COLOR_ACCENT
-    cancelButton.AutoButtonColor = false
-    local function destroyDialog()
-        confirmGui:Destroy()
-    end
-    confirmButton.MouseButton1Click:Connect(function()
-        playSound(SOUND_CLICK)
-        destroyDialog()
-        if onConfirm then
+    ReGui:PopupModal({
+        Title = "Confirm Action",
+        AutoSize = "Y",
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+    }):Center():Label({
+        Text = message,
+        TextWrapped = true
+    }):Separator():List({
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        FlexMode = Enum.UIFlexMode.Fill,
+        HorizontalFlex = Enum.UIFlexAlignment.Fill,
+        Spacing = 10,
+    }):Button({
+        Text = "Confirm",
+        Callback = function(self)
+            playSound(SOUND_CLICK)
             onConfirm()
+            self.Parent.Parent:ClosePopup() -- Close the modal window
         end
-    end)
-    cancelButton.MouseButton1Click:Connect(function()
-        playSound(SOUND_CLICK)
-        destroyDialog()
-    end)
-    dialogFrame.Transparency = 1
-    local fadeInTween = TweenService:Create(dialogFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 0 })
-    fadeInTween:Play()
+    }):Button({
+        Text = "Cancel",
+        Callback = function(self)
+            playSound(SOUND_CLICK)
+            self.Parent.Parent:ClosePopup() -- Close the modal window
+        end
+    })
 end
 
-local function createMainGui()
-    Gui = Instance.new("ScreenGui")
-    Gui.Name = "XC0Z3_Old_Server_Finder_GUI"
-    Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    Gui.Parent = LocalPlayer.PlayerGui
-    Gui.Enabled = true
+--// Main Window Setup
+local Window = ReGui:Window({
+	Title = "XC0Z3 Old Server Finder v20",
+	Theme = "CrimsonBlade",
+	NoClose = false, -- Allow closing
+	Size = UDim2.new(0, 450, 0, 600), -- Slightly larger for more info/buttons
+	CanResize = true,
+}):Center()
 
-    local mainFrame = createUIElement("Frame", Gui, "MainFrame", UDim2.new(0.35, 0, 0.65, 0), UDim2.new(0.3, 0, 0.15, 0), GUI_COLOR_BACKGROUND)
-    mainFrame.BackgroundTransparency = 0.05
-    mainFrame.Active = true
-    mainFrame.Draggable = false
+-- Add the watermark directly to the window
+Window:Label({
+	Text = "Made by XC0Z3",
+	TextColor = Color3.fromRGB(150, 150, 150),
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.new(0.01, 0, 0.01, 0),
+})
 
-    local titleBar = createUIElement("Frame", mainFrame, "TitleBar", UDim2.new(1, 0, 0.08, 0), UDim2.new(0, 0, 0, 0), GUI_COLOR_FOREGROUND)
-    titleBar.BackgroundTransparency = 0.9
-    titleBar.Active = true
-    titleBar.Draggable = false
+local Group = Window:List({
+	UiPadding = 2,
+	HorizontalFlex = Enum.UIFlexAlignment.Fill,
+})
 
-    local titleLabel = createUIElement("TextLabel", titleBar, "TitleLabel", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), titleBar.BackgroundColor3, GUI_COLOR_FOREGROUND, "XC0Z3 Old Server Finder 🌿", Enum.Font.Code, true)
-    titleLabel.BackgroundTransparency = 1
+local TabsBar = Group:List({
+	Border = true,
+	UiPadding = 5,
+	BorderColor = Window:GetThemeKey("Border"),
+	BorderThickness = 1,
+	HorizontalFlex = Enum.UIFlexAlignment.Fill,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	AutomaticSize = Enum.AutomaticSize.X, -- Let X size automatically based on content
+	FlexMode = Enum.UIFlexMode.Horizontal, -- Arrange tabs horizontally
+	Spacing = 5,
+	CornerRadius = UDim.new(0, 5)
+})
+local TabSelector = Group:TabSelector({
+	NoTabsBar = true,
+	Size = UDim2.fromScale(1, 1), -- Take full available space
+})
 
-    local watermark = createUIElement("TextLabel", mainFrame, "Watermark", UDim2.new(0.3, 0, 0.05, 0), UDim2.new(0.01, 0, 0.01, 0), GUI_COLOR_BACKGROUND, GUI_COLOR_FOREGROUND, "Made by XC0Z3", Enum.Font.Code, false)
-    watermark.TextSize = 12
-    watermark.BackgroundTransparency = 1
+local function CreateTab(Name: string, Icon)
+	local Tab = TabSelector:CreateTab({
+		Name = Name
+	})
 
-    titleBar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            IsDragging = true
-            DraggingOffset = mainFrame.AbsolutePosition - input.Position
-            UserInputService.InputChanged:Connect(function(inputChanged)
-                if inputChanged.UserInputType == Enum.UserInputType.MouseMovement or inputChanged.UserInputType == Enum.UserInputType.Touch then
-                    if IsDragging then
-                        mainFrame.Position = UDim2.new(0, inputChanged.Position.X + DraggingOffset.X, 0, inputChanged.Position.Y + DraggingOffset.Y)
-                    end
-                end
-            end)
-        end
-    end)
+	local List = Tab:List({
+		HorizontalFlex = Enum.UIFlexAlignment.Fill,
+		UiPadding = 10,
+		Spacing = 10
+	})
 
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            IsDragging = false
-        end
-    end)
+	local Button = TabsBar:Image({
+		Image = Icon,
+		Ratio = 1,
+		RatioAxis = Enum.DominantAxis.Width,
+		Size = UDim2.new(0, 32, 0, 32), -- Fixed size for tab icons
+		Callback = function(self)
+			TabSelector:SetActiveTab(Tab)
+			playSound(SOUND_CLICK)
+		end,
+	})
 
-    local infoFrame = createUIElement("Frame", mainFrame, "InfoFrame", UDim2.new(0.96, 0, 0.18, 0), UDim2.new(0.02, 0, 0.1, 0), GUI_COLOR_BACKGROUND)
-    infoFrame.BackgroundTransparency = 0.5
-    infoFrame.BorderSizePixel = 1
-    infoFrame.BorderColor3 = GUI_COLOR_ACCENT
+	ReGui:SetItemTooltip(Button, function(Canvas)
+		Canvas:Label({
+			Text = Name
+		})
+	end)
 
-    local currentVersionLabel = createUIElement("TextLabel", infoFrame, "VersionLabel", UDim2.new(0.9, 0, 0.25, 0), UDim2.new(0.05, 0, 0.02, 0), infoFrame.BackgroundColor3, GUI_COLOR_FOREGROUND, "Version: Loading...", Enum.Font.Code, true)
-    currentVersionLabel.BackgroundTransparency = 1
-    local playerCountLabel = createUIElement("TextLabel", infoFrame, "PlayersLabel", UDim2.new(0.9, 0, 0.25, 0), UDim2.new(0.05, 0, 0.35, 0), infoFrame.BackgroundColor3, GUI_COLOR_FOREGROUND, "Players: Loading...", Enum.Font.Code, true)
-    playerCountLabel.BackgroundTransparency = 1
-    local jobIDLabel = createUIElement("TextLabel", infoFrame, "JobIDLabel", UDim2.new(0.9, 0, 0.25, 0), UDim2.new(0.05, 0, 0.68, 0), infoFrame.BackgroundColor3, GUI_COLOR_FOREGROUND, "Job ID: Loading...", Enum.Font.Code, true)
-    jobIDLabel.BackgroundTransparency = 1
+	return List
+end
 
-    local function updateCurrentServerInfo()
-        local currentVersionText = "N/A"
-        local currentJobId = "N/A"
-        if game.PrivateServerInfo and game.PrivateServerInfo.version then
-            currentVersionText = tostring(game.PrivateServerInfo.version)
-        else
-            local foundVersionLabel
-            for _, v in pairs(game.CoreGui:GetDescendants()) do
-                if v:IsA("TextLabel") and string.match(v.Text, "^v%d+$") then
-                    foundVersionLabel = v
-                    break
-                end
-            end
-            if foundVersionLabel then
-                local detectedVersion = tonumber(string.match(foundVersionLabel.Text, "%d+"))
-                if detectedVersion then
-                    currentVersionText = tostring(detectedVersion)
-                end
-            end
-        end
-        currentVersionLabel.Text = "Version: " .. currentVersionText
-        playerCountLabel.Text = "Players: " .. tostring(Players.NumPlayers)
-        if game.JobId then
-            currentJobId = game.JobId
-            local visiblePart = string.sub(currentJobId, 1, math.min(string.len(currentJobId), 10))
-            jobIDLabel.Text = "Job ID: " .. visiblePart .. "..."
-        else
-            jobIDLabel.Text = "Job ID: N/A"
-        end
-    end
-    updateCurrentServerInfo()
-    Players.PlayerAdded:Connect(updateCurrentServerInfo)
-    Players.PlayerRemoving:Connect(updateCurrentServerInfo)
+local function CreateRegion(Parent, Title)
+	local Region = Parent:Region({
+		Border = true,
+		BorderColor = Window:GetThemeKey("Border"),
+		BorderThickness = 1,
+		CornerRadius = UDim.new(0, 5),
+		HorizontalFlex = Enum.UIFlexAlignment.Fill,
+	})
 
-    local buttonsFrame = createUIElement("Frame", mainFrame, "ButtonsFrame", UDim2.new(0.96, 0, 0.66, 0), UDim2.new(0.02, 0, 0.3, 0), GUI_COLOR_BACKGROUND)
-    buttonsFrame.BackgroundTransparency = 0.5
-    buttonsFrame.BorderSizePixel = 1
-    buttonsFrame.BorderColor3 = GUI_COLOR_ACCENT
+	Region:Label({
+		Text = Title,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor = Window:GetThemeKey("Text") -- Ensure title text color is correct
+	})
+	Region:Separator() -- Add a separator after the title
 
-    local function createStyledButton(parent, name, text, size, position)
-        local button = createUIElement("TextButton", parent, name, size, position, GUI_COLOR_FOREGROUND, GUI_COLOR_BACKGROUND, text, Enum.Font.Code, true)
-        button.BackgroundTransparency = 0
-        button.AutoButtonColor = false
-        button.BorderColor3 = GUI_COLOR_FOREGROUND
-        button.BorderSizePixel = 1
-        button.MouseEnter:Connect(function()
-            button:TweenBackgroundColor3(GUI_COLOR_ACCENT, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.1, true)
-        end)
-        button.MouseLeave:Connect(function()
-            button:TweenBackgroundColor3(GUI_COLOR_FOREGROUND, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.1, true)
-        end)
-        button.MouseButton1Click:Connect(function()
-            playSound(SOUND_CLICK)
-        end)
-        return button
-    end
+	return Region
+end
 
-    local minVersionInput = createUIElement("TextBox", buttonsFrame, "MinVersionInput", UDim2.new(0.44, 0, 0.08, 0), UDim2.new(0.05, 0, 0.02, 0), GUI_COLOR_BACKGROUND, GUI_COLOR_FOREGROUND, tostring(DEFAULT_MIN_OLD_VERSION), Enum.Font.Code, false)
-    minVersionInput.PlaceholderText = "Min Version"
-    minVersionInput.TextSize = 14
-    minVersionInput.TextXAlignment = Enum.TextXAlignment.Center
-    minVersionInput.InputEnded:Connect(function()
-        local num = tonumber(minVersionInput.Text)
-        if num then
-            currentMinFilter = num
-            showNotification("Min Version set to: " .. num, false)
-        else
-            minVersionInput.Text = tostring(currentMinFilter)
-            showNotification("Invalid Min Version. Keeping current.", true)
-        end
-    end)
+local MainTab = CreateTab("Main", ReGui.Icons.Home)
+local SettingsTab = CreateTab("Settings", ReGui.Icons.Settings)
 
-    local maxVersionInput = createUIElement("TextBox", buttonsFrame, "MaxVersionInput", UDim2.new(0.44, 0, 0.08, 0), UDim2.new(0.51, 0, 0.02, 0), GUI_COLOR_BACKGROUND, GUI_COLOR_FOREGROUND, tostring(DEFAULT_MAX_OLD_VERSION), Enum.Font.Code, false)
-    maxVersionInput.PlaceholderText = "Max Version"
-    maxVersionInput.TextSize = 14
-    maxVersionInput.TextXAlignment = Enum.TextXAlignment.Center
-    maxVersionInput.InputEnded:Connect(function()
-        local num = tonumber(maxVersionInput.Text)
-        if num then
-            currentMaxFilter = num
-            showNotification("Max Version set to: " .. num, false)
-        else
-            maxVersionInput.Text = tostring(currentMaxFilter)
-            showNotification("Invalid Max Version. Keeping current.", true)
-        end
-    end)
+--// Main Tab Content
+local ServerInfoSection = CreateRegion(MainTab, "Current Server Info")
+currentVersionLabelRef = ServerInfoSection:Label({
+	Text = "Version: Loading...",
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextScaled = true,
+})
+playerCountLabelRef = ServerInfoSection:Label({
+	Text = "Players: Loading...",
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextScaled = true,
+})
+jobIDLabelRef = ServerInfoSection:Label({
+	Text = "Job ID: Loading...",
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextScaled = true,
+})
 
-    local findOldServerBtn = createStyledButton(buttonsFrame, "FindOldServerButton", "🔍 Find Old Server", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.12, 0))
-    local totalOldServersLabel = createUIElement("TextLabel", buttonsFrame, "TotalOldServersLabel", UDim2.new(0.9, 0, 0.08, 0), UDim2.new(0.05, 0, 0.23, 0), buttonsFrame.BackgroundColor3, GUI_COLOR_FOREGROUND, "Found: 0", Enum.Font.Code, true)
-    totalOldServersLabel.BackgroundTransparency = 1
-    totalOldServersLabel.TextSize = 14
-
-    local checkServerListBtn = createStyledButton(buttonsFrame, "CheckServerListButton", "🌐 Check Server List (Console)", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.32, 0))
-    local stayInCurrentServerBtn = createStyledButton(buttonsFrame, "StayInCurrentServerButton", "🎯 Stay in Current Server (OFF)", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.44, 0))
-    local copyJobIDBtn = createStyledButton(buttonsFrame, "CopyJobIDButton", "📋 Copy Job ID", UDim2.new(0.44, 0, 0.1, 0), UDim2.new(0.05, 0, 0.56, 0))
-    local copyVersionBtn = createStyledButton(buttonsFrame, "CopyVersionButton", "📄 Copy Version", UDim2.new(0.44, 0, 0.1, 0), UDim2.new(0.51, 0, 0.56, 0))
-    local refreshInfoBtn = createStyledButton(buttonsFrame, "RefreshInfoButton", "🔄 Refresh Info", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.68, 0))
-    local autoRetryToggle = createStyledButton(buttonsFrame, "AutoRetryToggle", "♻️ Auto Retry (OFF)", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.8, 0))
-    autoRetryToggle.TextSize = 14
-    autoRetryToggle.Font = Enum.Font.Code
-    autoRetryToggle.TextWrapped = true
-
-    autoRetryToggle.MouseButton1Click:Connect(function()
-        playSound(SOUND_CLICK)
-        AutoRetryEnabled = not AutoRetryEnabled
-        autoRetryToggle.Text = "♻️ Auto Retry (" .. (AutoRetryEnabled and "ON" or "OFF") .. ")"
-        if AutoRetryEnabled then
-            showNotification("Auto Retry Enabled!", false)
-        else
-            showNotification("Auto Retry Disabled!", false)
-        end
-    end)
-
-    refreshInfoBtn.MouseButton1Click:Connect(function()
-        playSound(SOUND_CLICK)
-        updateCurrentServerInfo()
-        showNotification("Current server info refreshed.", false)
-    end)
-
-    local function isCurrentServerMatchingFilter()
-        local serverVersion = nil
-        if game.PrivateServerInfo and game.PrivateServerInfo.version then
-            serverVersion = tonumber(game.PrivateServerInfo.version)
-        else
-            local foundVersionLabel
-            for _, v in pairs(game.CoreGui:GetDescendants()) do
-                if v:IsA("TextLabel") and string.match(v.Text, "^v%d+$") then
-                    foundVersionLabel = v
-                    break
-                end
-            end
-            if foundVersionLabel then
-                serverVersion = tonumber(string.match(foundVersionLabel.Text, "%d+"))
-            end
-        end
-        return serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter
-    end
-
-    local function checkEasterShop(jobId)
-        -- This function's actual capability is limited from client-side Roblox Lua.
-        -- True detection of specific in-game assets loaded on another server's instance
-        -- requires deep knowledge of game internals or server-side exploits.
-        -- The previous approach using HttpService:GetAsync with Roblox-Job-Id header
-        -- might be an attempt to see if the asset is "associated" with that JobId,
-        -- but it doesn't guarantee its presence *within* the running game instance.
-        -- For a practical executor script, we'll indicate this limitation.
-        -- For demonstration, we can return true if EASTER_SHOP_ASSET_ID is set.
-        if EASTER_SHOP_ASSET_ID ~= "1234567890" then
-            -- Simulate a check if an ID is provided. In reality, this requires more.
-            -- This is where a more advanced, game-specific exploit or server-side tool would be needed.
-            return true -- Placeholder for demonstration purposes
-        end
-        return false
-    end
-
-    local function scanAndTeleport(searchEasterShop)
-        if IsScanning then
-            return
-        end
-        IsScanning = true
-        showNotification("Searching for " .. (searchEasterShop and "Easter Shop" or "filtered") .. " servers...", false)
-        totalOldServersLabel.Text = "Found: Scanning..."
-
-        local foundTargetServers = {}
-        local cursor = ""
-        local pageCount = 0
-        local maxPagesToScan = 10 -- Limit to 10 pages for performance
-
-        task.spawn(function()
-            while pageCount < maxPagesToScan do
-                local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=2&limit=100"
-                if cursor ~= "" then
-                    url = url .. "&cursor=" .. cursor
-                end
-
-                local success, response = pcall(function()
-                    return HttpService:JSONDecode(HttpService:GetAsync(url))
-                end)
-
-                if success and response and response.data then
-                    for _, server in ipairs(response.data) do
-                        local serverVersion = tonumber(server.version)
-                        local matchesVersion = serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter
-                        local hasEasterShop = false
-
-                        if searchEasterShop then
-                            hasEasterShop = checkEasterShop(server.id)
-                        end
-
-                        if (not searchEasterShop and matchesVersion) or (searchEasterShop and hasEasterShop) then
-                            table.insert(foundTargetServers, server)
-                        end
-                    end
-                    cursor = response.nextPageCursor
-                    pageCount = pageCount + 1
-                    if not cursor then
-                        break
-                    end
-                else
-                    warn("XC0Z3 Server Finder: Failed to fetch server list or decode JSON. Error: " .. tostring(response))
-                    showNotification("Error: Could not fetch server list.", true)
-                    break
-                end
-            end
-
-            IsScanning = false
-            LastScanTime = tick()
-            totalOldServersLabel.Text = "Found: " .. #foundTargetServers
-
-            if #foundTargetServers > 0 then
-                local teleportMessage = searchEasterShop and "Easter Shop server found!" or "Matching server found!"
-                showNotification("Found " .. #foundTargetServers .. " " .. (searchEasterShop and "Easter Shop" or "matching") .. " servers!", false)
-                playSound(SOUND_FOUND)
-                local targetServer = foundTargetServers[1]
-                
-                if not searchEasterShop and isCurrentServerMatchingFilter() and game.JobId == targetServer.id then
-                    showNotification("Already in a matching server. No teleport needed.", false)
-                    return
-                end
-
-                showConfirmDialog(teleportMessage .. "\nVersion: " .. targetServer.version .. "\nPlayers: " .. targetServer.players .. "\nJob ID: " .. string.sub(targetServer.id, 1, 10) .. "...\nTeleport now?", function()
-                    TeleportService:TeleportToPlaceInstance(PlaceId, targetServer.id)
-                end)
-            else
-                local notFoundMessage = searchEasterShop and "No Easter Shop servers found." or "No servers found in range " .. currentMinFilter .. "-" .. currentMaxFilter .. "."
-                showNotification(notFoundMessage, true)
-            end
-        end)
-    end
-
-    findOldServerBtn.MouseButton1Click:Connect(function()
-        scanAndTeleport(false)
-    end)
-
-    local findEasterShopBtn = createStyledButton(buttonsFrame, "FindEasterShopBtn", "🥚 Find Easter Shop", UDim2.new(0.9, 0, 0.1, 0), UDim2.new(0.05, 0, 0.92, 0))
-    findEasterShopBtn.MouseButton1Click:Connect(function()
-        if EASTER_SHOP_ASSET_ID == "1234567890" then
-            showNotification("EASTER_SHOP_ASSET_ID is a placeholder. Please update script with actual asset ID if possible.", true)
-            return
-        end
-        scanAndTeleport(true)
-    end)
-
-    checkServerListBtn.MouseButton1Click:Connect(function()
-        playSound(SOUND_CLICK)
-        if IsScanning then
-            showNotification("Already scanning servers. Please wait.", false)
-            return
-        end
-        IsScanning = true
-        showNotification("Checking server list in console...", false)
-        print("\n--- XC0Z3 Server List Check --- github.com/XC0Z3/ServerFinder ---\n")
-        local cursor = ""
-        local pageCount = 0
-        local serversFoundCount = 0
-        local maxPagesToScan = 10
-
-        task.spawn(function()
-            while pageCount < maxPagesToScan do
-                local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=2&limit=100"
-                if cursor ~= "" then
-                    url = url .. "&cursor=" .. cursor
-                end
-
-                local success, response = pcall(function()
-                    return HttpService:JSONDecode(HttpService:GetAsync(url))
-                end)
-
-                if success and response and response.data then
-                    for _, server in ipairs(response.data) do
-                        local serverVersion = tonumber(server.version)
-                        local versionStatus = (serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter) and "[MATCHING]" or "[NEW]"
-                        
-                        local hasEasterShop = false
-                        if EASTER_SHOP_ASSET_ID ~= "1234567890" then
-                            hasEasterShop = checkEasterShop(server.id)
-                        end
-                        local easterShopStatus = hasEasterShop and " (EASTER SHOP DETECTED)" or ""
-                        
-                        print(string.format("  %s Job ID: %s | Version: %s | Players: %d/%d%s", versionStatus, server.id, server.version, server.players, server.maxPlayers, easterShopStatus))
-                        if versionStatus == "[MATCHING]" or easterShopStatus ~= "" then
-                            serversFoundCount = serversFoundCount + 1
-                        end
-                    end
-                    cursor = response.nextPageCursor
-                    pageCount = pageCount + 1
-                    if not cursor then
-                        break
-                    end
-                else
-                    warn("XC0Z3 Server Finder: Failed to fetch server list or decode JSON for console check. Error: " .. tostring(response))
-                    print("--- End of Server List Check (Error) ---")
-                    break
-                end
-            end
-            IsScanning = false
-            print("\n--- End of Server List Check. Found " .. serversFoundCount .. " relevant servers. ---")
-            showNotification("Server list printed to console. Found " .. serversFoundCount .. " relevant servers.", false)
-        end)
-    end)
-
-    copyJobIDBtn.MouseButton1Click:Connect(function()
+ServerInfoSection:List({
+    HorizontalFlex = Enum.UIFlexAlignment.Fill,
+    FlexMode = Enum.UIFlexMode.Horizontal,
+    Spacing = 5,
+}):Button({
+    Text = "📋 Copy Job ID",
+    Callback = function()
         playSound(SOUND_CLICK)
         if game.JobId then
             local jobId = game.JobId
@@ -523,29 +259,12 @@ local function createMainGui()
         else
             showNotification("Error: Current Job ID not available.", true)
         end
-    end)
-
-    copyVersionBtn.MouseButton1Click:Connect(function()
+    end
+}):Button({
+    Text = "📄 Copy Version",
+    Callback = function()
         playSound(SOUND_CLICK)
-        local currentVersionText = ""
-        if game.PrivateServerInfo and game.PrivateServerInfo.version then
-            currentVersionText = tostring(game.PrivateServerInfo.version)
-        else
-            local foundVersionLabel
-            for _, v in pairs(game.CoreGui:GetDescendants()) do
-                if v:IsA("TextLabel") and string.match(v.Text, "^v%d+$") then
-                    foundVersionLabel = v
-                    break
-                end
-            end
-            if foundVersionLabel then
-                local detectedVersion = tonumber(string.match(foundVersionLabel.Text, "%d+"))
-                if detectedVersion then
-                    currentVersionText = tostring(detectedVersion)
-                end
-            end
-        end
-
+        local currentVersionText = currentVersionLabelRef.Text:gsub("Version: ", "")
         if currentVersionText ~= "" and currentVersionText ~= "N/A" then
             pcall(function()
                 LocalPlayer:GetMouse().Clipboard = currentVersionText
@@ -554,20 +273,313 @@ local function createMainGui()
         else
             showNotification("Error: Current Version not available.", true)
         end
-    end)
+    end
+})
 
-    RunService.Stepped:Connect(function(time, deltaTime)
-        if AutoRetryEnabled and not IsScanning and (tick() - LastScanTime) >= ScanCooldown then
-            scanAndTeleport(false)
+ServerInfoSection:Button({
+	Text = "🔄 Refresh Info",
+	Callback = function()
+		playSound(SOUND_CLICK)
+		updateCurrentServerInfo()
+		showNotification("Current server info refreshed.", false)
+	end
+})
+
+
+local SearchFilterSection = CreateRegion(MainTab, "Search Filter (Versions)")
+local minVersionInput = SearchFilterSection:TextBox({
+	Label = "Min Version:",
+	Default = tostring(DEFAULT_MIN_OLD_VERSION),
+	Callback = function(self, text)
+		local num = tonumber(text)
+		if num then
+			currentMinFilter = num
+			showNotification("Min Version set to: " .. num, false)
+		else
+			self:SetText(tostring(currentMinFilter)) -- Revert on invalid input
+			showNotification("Invalid Min Version. Keeping current.", true)
+		end
+	end,
+})
+local maxVersionInput = SearchFilterSection:TextBox({
+	Label = "Max Version:",
+	Default = tostring(DEFAULT_MAX_OLD_VERSION),
+	Callback = function(self, text)
+		local num = tonumber(text)
+		if num then
+			currentMaxFilter = num
+			showNotification("Max Version set to: " .. num, false)
+		else
+			self:SetText(tostring(currentMaxFilter)) -- Revert on invalid input
+			showNotification("Invalid Max Version. Keeping current.", true)
+		end
+	end,
+})
+
+local ActionsSection = CreateRegion(MainTab, "Actions")
+ActionsSection:Button({
+	Text = "🔍 Find Matching Server",
+	Callback = function()
+		scanAndTeleport(false)
+	end
+})
+totalOldServersLabelRef = ActionsSection:Label({
+	Text = "Found: 0",
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextScaled = true,
+})
+ActionsSection:Button({
+	Text = "🌐 Check Server List (Console)",
+	Callback = function()
+		checkServerList()
+	end
+})
+ActionsSection:Button({
+	Text = "🥚 Find Easter Shop",
+	Callback = function()
+		if EASTER_SHOP_ASSET_ID == "1234567890" then
+            showNotification("EASTER_SHOP_ASSET_ID is a placeholder. Please update script with actual asset ID if possible.", true)
+            return
         end
-    end)
-    
-    mainFrame.Transparency = 1
-    local fadeInTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 0 })
-    fadeInTween:Play()
+		scanAndTeleport(true)
+	end
+})
+autoRetryToggleRef = ActionsSection:Checkbox({
+	Label = "♻️ Auto Retry",
+	Value = AutoRetryEnabled,
+	Callback = function(self, Value)
+		AutoRetryEnabled = Value
+		if AutoRetryEnabled then
+            showNotification("Auto Retry Enabled!", false)
+        else
+            showNotification("Auto Retry Disabled!", false)
+        end
+	end
+})
 
-    return Gui
+--// Settings Tab Content
+local GuiControlSection = CreateRegion(SettingsTab, "GUI Controls")
+GuiControlSection:Keybind({
+	Label = "Toggle GUI Visibility",
+	Value = Enum.KeyCode.RightShift,
+	IgnoreGameProcessed = true,
+	Callback = function(_, NewKeybind)
+		Window:SetVisible(not Window.Visible)
+	end,
+})
+GuiControlSection:Button({
+	Text = "Unload Script",
+	Callback = function()
+		Window:Close()
+		-- Also clean up any ongoing processes if necessary
+	end
+})
+
+--// Core Functions (unchanged logic, adapted to ReGui callbacks)
+local function updateCurrentServerInfo()
+    local currentVersionText = "N/A"
+    local currentJobId = "N/A"
+    
+    if game.PrivateServerInfo and game.PrivateServerInfo.version then
+        currentVersionText = tostring(game.PrivateServerInfo.version)
+    else
+        local foundVersionLabel
+        for _, v in pairs(game.CoreGui:GetDescendants()) do
+            if v:IsA("TextLabel") and string.match(v.Text, "^v%d+$") then
+                foundVersionLabel = v
+                break
+            end
+        end
+        if foundVersionLabel then
+            local detectedVersion = tonumber(string.match(foundVersionLabel.Text, "%d+"))
+            if detectedVersion then
+                currentVersionText = tostring(detectedVersion)
+            end
+        end
+    end
+    currentVersionLabelRef:SetText("Version: " .. currentVersionText)
+    playerCountLabelRef:SetText("Players: " .. tostring(Players.NumPlayers))
+    if game.JobId then
+        currentJobId = game.JobId
+        local visiblePart = string.sub(currentJobId, 1, math.min(string.len(currentJobId), 10))
+        jobIDLabelRef:SetText("Job ID: " .. visiblePart .. "...")
+    else
+        jobIDLabelRef:SetText("Job ID: N/A")
+    end
 end
 
-createMainGui()
-print("XC0Z3 Old Server Finder v20 Initialized. For support: github.com/XC0Z3")
+local function isCurrentServerMatchingFilter()
+    local serverVersion = nil
+    if game.PrivateServerInfo and game.PrivateServerInfo.version then
+        serverVersion = tonumber(game.PrivateServerInfo.version)
+    else
+        local foundVersionLabel
+        for _, v in pairs(game.CoreGui:GetDescendants()) do
+            if v:IsA("TextLabel") and string.match(v.Text, "^v%d+$") then
+                foundVersionLabel = v
+                break
+            end
+        end
+        if foundVersionLabel then
+            serverVersion = tonumber(string.match(foundVersionLabel.Text, "%d+"))
+        end
+    end
+    return serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter
+end
+
+local function checkEasterShop(jobId)
+    -- As previously stated, direct client-side detection of assets loaded
+    -- on other server instances is generally not possible.
+    -- This remains a placeholder for demonstration purposes.
+    if EASTER_SHOP_ASSET_ID ~= "1234567890" then
+        -- Assume detection if ID is provided for script functionality demo
+        return true 
+    end
+    return false
+end
+
+local function scanAndTeleport(searchEasterShop)
+    if IsScanning then
+        showNotification("Already scanning servers. Please wait.", false)
+        return
+    end
+    IsScanning = true
+    showNotification("Searching for " .. (searchEasterShop and "Easter Shop" or "filtered") .. " servers...", false)
+    totalOldServersLabelRef:SetText("Found: Scanning...")
+
+    local foundTargetServers = {}
+    local cursor = ""
+    local pageCount = 0
+    local maxPagesToScan = 10 -- Limit to 10 pages for performance
+
+    task.spawn(function()
+        while pageCount < maxPagesToScan do
+            local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=2&limit=100"
+            if cursor ~= "" then
+                url = url .. "&cursor=" .. cursor
+            end
+
+            local success, response = pcall(function()
+                return HttpService:JSONDecode(HttpService:GetAsync(url))
+            end)
+
+            if success and response and response.data then
+                for _, server in ipairs(response.data) do
+                    local serverVersion = tonumber(server.version)
+                    local matchesVersion = serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter
+                    local hasEasterShop = false
+
+                    if searchEasterShop then
+                        hasEasterShop = checkEasterShop(server.id)
+                    end
+
+                    if (not searchEasterShop and matchesVersion) or (searchEasterShop and hasEasterShop) then
+                        table.insert(foundTargetServers, server)
+                    end
+                end
+                cursor = response.nextPageCursor
+                pageCount = pageCount + 1
+                if not cursor then
+                    break
+                end
+            else
+                warn("XC0Z3 Server Finder: Failed to fetch server list or decode JSON. Error: " .. tostring(response))
+                showNotification("Error: Could not fetch server list. Check console for details.", true)
+                break
+            end
+        end
+
+        IsScanning = false
+        LastScanTime = tick()
+        totalOldServersLabelRef:SetText("Found: " .. #foundTargetServers)
+
+        if #foundTargetServers > 0 then
+            local teleportMessage = searchEasterShop and "Easter Shop server found!" or "Matching server found!"
+            showNotification("Found " .. #foundTargetServers .. " " .. (searchEasterShop and "Easter Shop" or "matching") .. " servers!", false)
+            playSound(SOUND_FOUND)
+            local targetServer = foundTargetServers[1]
+            
+            if not searchEasterShop and isCurrentServerMatchingFilter() and game.JobId == targetServer.id then
+                showNotification("Already in a matching server. No teleport needed.", false)
+                return
+            end
+
+            showConfirmDialog(teleportMessage .. "\nVersion: " .. targetServer.version .. "\nPlayers: " .. targetServer.players .. "\nJob ID: " .. string.sub(targetServer.id, 1, 10) .. "...\nTeleport now?", function()
+                TeleportService:TeleportToPlaceInstance(PlaceId, targetServer.id)
+            end)
+        else
+            local notFoundMessage = searchEasterShop and "No Easter Shop servers found." or "No servers found in range " .. currentMinFilter .. "-" .. currentMaxFilter .. "."
+            showNotification(notFoundMessage, true)
+        end
+    end)
+end
+
+local function checkServerList()
+    playSound(SOUND_CLICK)
+    if IsScanning then
+        showNotification("Already scanning servers. Please wait.", false)
+        return
+    end
+    IsScanning = true
+    showNotification("Checking server list in console...", false)
+    print("\n--- XC0Z3 Server List Check --- github.com/XC0Z3/ServerFinder ---\n")
+    local cursor = ""
+    local pageCount = 0
+    local serversFoundCount = 0
+    local maxPagesToScan = 10
+
+    task.spawn(function()
+        while pageCount < maxPagesToScan do
+            local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=2&limit=100"
+            if cursor ~= "" then
+                url = url .. "&cursor=" .. cursor
+            end
+
+            local success, response = pcall(function()
+                return HttpService:JSONDecode(HttpService:GetAsync(url))
+            end)
+
+            if success and response and response.data then
+                for _, server in ipairs(response.data) do
+                    local serverVersion = tonumber(server.version)
+                    local versionStatus = (serverVersion and serverVersion >= currentMinFilter and serverVersion <= currentMaxFilter) and "[MATCHING]" or "[NEW]"
+                    
+                    local hasEasterShop = false
+                    if EASTER_SHOP_ASSET_ID ~= "1234567890" then
+                        hasEasterShop = checkEasterShop(server.id)
+                    end
+                    local easterShopStatus = hasEasterShop and " (EASTER SHOP DETECTED)" or ""
+                    
+                    print(string.format("  %s Job ID: %s | Version: %s | Players: %d/%d%s", versionStatus, server.id, server.version, server.players, server.maxPlayers, easterShopStatus))
+                    if versionStatus == "[MATCHING]" or easterShopStatus ~= "" then
+                        serversFoundCount = serversFoundCount + 1
+                    end
+                end
+                cursor = response.nextPageCursor
+                pageCount = pageCount + 1
+                if not cursor then
+                    break
+                end
+            else
+                warn("XC0Z3 Server Finder: Failed to fetch server list or decode JSON for console check. Error: " .. tostring(response))
+                print("--- End of Server List Check (Error) ---")
+                break
+            end
+        end
+        IsScanning = false
+        print("\n--- End of Server List Check. Found " .. serversFoundCount .. " relevant servers. ---")
+        showNotification("Server list printed to console. Found " .. serversFoundCount .. " relevant servers.", false)
+    end)
+end
+
+-- Initial update and auto-retry loop
+RunService.Stepped:Connect(function(time, deltaTime)
+    if AutoRetryEnabled and not IsScanning and (tick() - LastScanTime) >= ScanCooldown then
+        scanAndTeleport(false)
+    end
+end)
+
+-- Initial update of server info when GUI loads
+updateCurrentServerInfo()
+Window.Visible = true -- Ensure the window is visible on load
+print("XC0Z3 Old Server Finder v20")
